@@ -7,11 +7,14 @@ import (
 	"time"
 
 	"github.com/Shopify/sarama"
+	"github.com/ngaut/log"
+	"github.com/pingcap/wormhole/pkg/etcdutil"
 )
 
 // Consumer is a cluster group consumer
 type Consumer struct {
 	client *Client
+	etcd   *etcdutil.Client
 
 	csmr sarama.Consumer
 	subs *partitionMap
@@ -66,7 +69,7 @@ func NewConsumerFromClient(client *Client, groupID string, topics []string) (*Co
 }
 
 // NewConsumer initializes a new consumer
-func NewConsumer(addrs []string, groupID string, topics []string, config *Config) (*Consumer, error) {
+func NewConsumer(addrs []string, groupID string, topics []string, config *Config, etcd *etcdutil.Client) (*Consumer, error) {
 	client, err := NewClient(addrs, config)
 	if err != nil {
 		return nil, err
@@ -77,6 +80,7 @@ func NewConsumer(addrs []string, groupID string, topics []string, config *Config
 		_ = client.Close()
 		return nil, err
 	}
+	consumer.etcd = etcd
 	consumer.client.own = true
 	return consumer, nil
 }
@@ -141,8 +145,7 @@ func (c *Consumer) CommitOffsets() error {
 	c.commitMu.Lock()
 	defer c.commitMu.Unlock()
 
-	req := &sarama.OffsetCommitRequest{
-		Version:                 2,
+	req := &OffsetCommitRequest{
 		ConsumerGroup:           c.groupID,
 		ConsumerGroupGeneration: c.generationID,
 		ConsumerID:              c.memberID,
@@ -154,6 +157,7 @@ func (c *Consumer) CommitOffsets() error {
 	}
 
 	snap := c.subs.Snapshot()
+	log.Debugf("[commit offset] snap %+v", snap)
 	dirty := false
 	for tp, state := range snap {
 		if state.Dirty {
@@ -162,25 +166,23 @@ func (c *Consumer) CommitOffsets() error {
 		}
 	}
 	if !dirty {
+		log.Debug("[commit offset] not dirty")
 		return nil
 	}
 
-	broker, err := c.client.Coordinator(c.groupID)
-	if err != nil {
-		c.closeCoordinator(broker, err)
-		return err
-	}
+	log.Debugf("[commit offset] req %+v", req)
 
-	resp, err := broker.CommitOffset(req)
+	manager := newEtcdOffsetManager(c.etcd)
+	resp, err := manager.CommitOffset(req)
 	if err != nil {
-		c.closeCoordinator(broker, err)
+		log.Errorf("[commit offset] err %s", err)
 		return err
 	}
 
 	for topic, errs := range resp.Errors {
-		for partition, kerr := range errs {
-			if kerr != sarama.ErrNoError {
-				err = kerr
+		for partition, e := range errs {
+			if e != nil {
+				err = e
 			} else if state, ok := snap[topicPartition{topic, partition}]; ok {
 				c.subs.Fetch(topic, partition).MarkCommitted(state.Info.Offset)
 			}
@@ -501,6 +503,7 @@ func (c *Consumer) rebalance() (map[string][]int32, error) {
 // Performs the subscription, part of the mainLoop()
 func (c *Consumer) subscribe(subs map[string][]int32) error {
 	// fetch offsets
+	log.Debug("fetch offsets")
 	offsets, err := c.fetchOffsets(subs)
 	if err != nil {
 		_ = c.leaveGroup()
@@ -545,6 +548,8 @@ func (c *Consumer) joinGroup() (*balancer, error) {
 		SessionTimeout: int32(c.client.config.Group.Session.Timeout / time.Millisecond),
 		ProtocolType:   "consumer",
 	}
+
+	log.Debugf("join group. groupid %s, memberid %s", c.groupID, c.memberID)
 
 	meta := &sarama.ConsumerGroupMemberMetadata{
 		Version:  1,
@@ -646,10 +651,10 @@ func (c *Consumer) syncGroup(strategy *balancer) (map[string][]int32, error) {
 }
 
 // Fetches latest committed offsets for all subscriptions
+// TODO: changed to fetch  from etcd
 func (c *Consumer) fetchOffsets(subs map[string][]int32) (map[string]map[int32]offsetInfo, error) {
 	offsets := make(map[string]map[int32]offsetInfo, len(subs))
-	req := &sarama.OffsetFetchRequest{
-		Version:       1,
+	req := &OffsetFetchRequest{
 		ConsumerGroup: c.groupID,
 	}
 
@@ -669,32 +674,31 @@ func (c *Consumer) fetchOffsets(subs map[string][]int32) (map[string]map[int32]o
 	// Note that this doesn't necessarily account for the end-to-end latency of the Kafka offsets topic.
 	select {
 	case <-c.dying:
+		log.Error("sarama.ErrClosedClient")
 		return nil, sarama.ErrClosedClient
 	case <-time.After(c.client.config.Group.Offsets.Synchronization.DwellTime * 2):
 	}
 
-	broker, err := c.client.Coordinator(c.groupID)
+	manager := newEtcdOffsetManager(c.etcd)
+	resp, err := manager.FetchOffset(req)
 	if err != nil {
-		c.closeCoordinator(broker, err)
+		log.Errorf("fetch offset error:%s", err)
 		return nil, err
 	}
 
-	resp, err := broker.FetchOffset(req)
-	if err != nil {
-		c.closeCoordinator(broker, err)
-		return nil, err
-	}
-
+	log.Debugf("subs %+v", subs)
 	for topic, partitions := range subs {
 		for _, partition := range partitions {
 			block := resp.GetBlock(topic, partition)
 			if block == nil {
+				log.Error("sarama.ErrIncompleteResponse")
 				return nil, sarama.ErrIncompleteResponse
 			}
 
-			if block.Err == sarama.ErrNoError {
+			if block.Err == nil {
 				offsets[topic][partition] = offsetInfo{Offset: block.Offset, Metadata: block.Metadata}
 			} else {
+				log.Error(block.Err)
 				return nil, block.Err
 			}
 		}

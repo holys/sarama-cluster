@@ -11,6 +11,9 @@ import (
 
 	"github.com/Shopify/sarama"
 	"github.com/bsm/sarama-cluster"
+	"github.com/coreos/etcd/clientv3"
+	nlog "github.com/ngaut/log"
+	"github.com/pingcap/wormhole/pkg/etcdutil"
 )
 
 var (
@@ -20,7 +23,7 @@ var (
 	offset     = flag.String("offset", "newest", "The offset to start with. Can be `oldest`, `newest`")
 	verbose    = flag.Bool("verbose", false, "Whether to turn on sarama logging")
 
-	logger = log.New(os.Stderr, "", log.LstdFlags)
+	logger = log.New(os.Stderr, "", log.LstdFlags|log.Lshortfile)
 )
 
 func main() {
@@ -52,12 +55,25 @@ func main() {
 		printUsageErrorAndExit("-offset should be `oldest` or `newest`")
 	}
 
+	client, err := clientv3.NewFromURL("127.0.0.1:2379")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	etcd := etcdutil.NewClient(client, "/root")
+
 	// Init consumer, consume errors & messages
-	consumer, err := cluster.NewConsumer(strings.Split(*brokerList, ","), *groupID, strings.Split(*topicList, ","), config)
+	consumer, err := cluster.NewConsumer(strings.Split(*brokerList, ","), *groupID, strings.Split(*topicList, ","), config, etcd)
 	if err != nil {
 		printErrorAndExit(69, "Failed to start consumer: %s", err)
 	}
-	defer consumer.Close()
+	defer func() {
+		err := consumer.Close()
+		if err != nil {
+			nlog.Error(err.Error())
+			return
+		}
+	}()
 
 	// Create signal channel
 	sigchan := make(chan os.Signal, 1)
