@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -12,7 +11,7 @@ import (
 	"github.com/Shopify/sarama"
 	"github.com/bsm/sarama-cluster"
 	"github.com/coreos/etcd/clientv3"
-	nlog "github.com/ngaut/log"
+	"github.com/ngaut/log"
 	"github.com/pingcap/wormhole/pkg/etcdutil"
 )
 
@@ -22,8 +21,7 @@ var (
 	topicList  = flag.String("topics", "", "REQUIRED: The comma separated list of topics to consume")
 	offset     = flag.String("offset", "newest", "The offset to start with. Can be `oldest`, `newest`")
 	verbose    = flag.Bool("verbose", false, "Whether to turn on sarama logging")
-
-	logger = log.New(os.Stderr, "", log.LstdFlags|log.Lshortfile)
+	logLevel   = flag.String("L", "info", "log level in debug, info, warn, error, fatal")
 )
 
 func main() {
@@ -37,14 +35,13 @@ func main() {
 		printUsageErrorAndExit("You have to provide -topics as a comma-separated list.")
 	}
 
+	log.SetLevelByString(*logLevel)
+
 	// Init config
 	config := cluster.NewConfig()
-	if *verbose {
-		sarama.Logger = logger
-	} else {
-		config.Consumer.Return.Errors = true
-		config.Group.Return.Notifications = true
-	}
+
+	config.Consumer.Return.Errors = true
+	config.Group.Return.Notifications = true
 
 	switch *offset {
 	case "oldest":
@@ -67,13 +64,7 @@ func main() {
 	if err != nil {
 		printErrorAndExit(69, "Failed to start consumer: %s", err)
 	}
-	defer func() {
-		err := consumer.Close()
-		if err != nil {
-			nlog.Error(err.Error())
-			return
-		}
-	}()
+	defer consumer.Close()
 
 	// Create signal channel
 	sigchan := make(chan os.Signal, 1)
@@ -89,11 +80,11 @@ func main() {
 			}
 		case ntf, more := <-consumer.Notifications():
 			if more {
-				logger.Printf("Rebalanced: %+v\n", ntf)
+				log.Infof("Rebalanced: %+v\n", ntf)
 			}
 		case err, more := <-consumer.Errors():
 			if more {
-				logger.Printf("Error: %s\n", err.Error())
+				log.Infof("Error: %s\n", err.Error())
 			}
 		case <-sigchan:
 			return

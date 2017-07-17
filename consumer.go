@@ -170,7 +170,7 @@ func (c *Consumer) CommitOffsets() error {
 		return nil
 	}
 
-	log.Debugf("[commit offset] req %+v", req)
+	log.Debugf("[commit offset] req blocks %+v", req.blocks)
 
 	manager := newEtcdOffsetManager(c.etcd)
 	resp, err := manager.CommitOffset(req)
@@ -726,7 +726,7 @@ func (c *Consumer) leaveGroup() error {
 // --------------------------------------------------------------------
 
 func (c *Consumer) createConsumer(topic string, partition int32, info offsetInfo) error {
-	sarama.Logger.Printf("cluster/consumer %s consume %s/%d from %d\n", c.memberID, topic, partition, info.NextOffset(c.client.config.Consumer.Offsets.Initial))
+	log.Infof("cluster/consumer %s consume %s/%d from %d\n", c.memberID, topic, partition, info.NextOffset(c.client.config.Consumer.Offsets.Initial))
 
 	// Create partitionConsumer
 	pc, err := newPartitionConsumer(c.csmr, topic, partition, info, c.client.config.Consumer.Offsets.Initial)

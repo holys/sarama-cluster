@@ -211,10 +211,7 @@ func (m *etcdOffsetManager) FetchOffset(request *OffsetFetchRequest) (*OffsetFet
 		return resp, nil
 	}
 
-	log.Debugf("partitions %+v", partitions.Partitions)
-
 	for _, p := range partitions.Partitions {
-		log.Debugf("partition %+v", p)
 		resp.AddBlock(p.TopicName, p.PartitionId, p.Pos.GetKafkaOffset(), 0, "")
 	}
 	return resp, nil
