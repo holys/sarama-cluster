@@ -63,9 +63,9 @@ func (s *OffsetStash) Offsets() map[string]int64 {
 
 type OffsetCommitRequest struct {
 	ConsumerGroup           string
-	ConsumerGroupGeneration int32  // v1 or later
-	ConsumerID              string // v1 or later
-	RetentionTime           int64  // v2 or later
+	ConsumerGroupGeneration int32  // nothing to do
+	ConsumerID              string // nothing to do
+	RetentionTime           int64  // nothing to do
 
 	blocks map[string]map[int32]*offsetCommitRequestBlock
 }
