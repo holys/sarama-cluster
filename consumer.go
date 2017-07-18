@@ -651,7 +651,6 @@ func (c *Consumer) syncGroup(strategy *balancer) (map[string][]int32, error) {
 }
 
 // Fetches latest committed offsets for all subscriptions
-// TODO: changed to fetch  from etcd
 func (c *Consumer) fetchOffsets(subs map[string][]int32) (map[string]map[int32]offsetInfo, error) {
 	offsets := make(map[string]map[int32]offsetInfo, len(subs))
 	req := &OffsetFetchRequest{
