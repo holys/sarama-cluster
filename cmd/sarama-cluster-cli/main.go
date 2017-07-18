@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -11,6 +10,9 @@ import (
 
 	"github.com/Shopify/sarama"
 	"github.com/bsm/sarama-cluster"
+	"github.com/coreos/etcd/clientv3"
+	"github.com/ngaut/log"
+	"github.com/pingcap/wormhole/pkg/etcdutil"
 )
 
 var (
@@ -19,8 +21,7 @@ var (
 	topicList  = flag.String("topics", "", "REQUIRED: The comma separated list of topics to consume")
 	offset     = flag.String("offset", "newest", "The offset to start with. Can be `oldest`, `newest`")
 	verbose    = flag.Bool("verbose", false, "Whether to turn on sarama logging")
-
-	logger = log.New(os.Stderr, "", log.LstdFlags)
+	logLevel   = flag.String("L", "info", "log level in debug, info, warn, error, fatal")
 )
 
 func main() {
@@ -34,14 +35,13 @@ func main() {
 		printUsageErrorAndExit("You have to provide -topics as a comma-separated list.")
 	}
 
+	log.SetLevelByString(*logLevel)
+
 	// Init config
 	config := cluster.NewConfig()
-	if *verbose {
-		sarama.Logger = logger
-	} else {
-		config.Consumer.Return.Errors = true
-		config.Group.Return.Notifications = true
-	}
+
+	config.Consumer.Return.Errors = true
+	config.Group.Return.Notifications = true
 
 	switch *offset {
 	case "oldest":
@@ -52,8 +52,15 @@ func main() {
 		printUsageErrorAndExit("-offset should be `oldest` or `newest`")
 	}
 
+	client, err := clientv3.NewFromURL("127.0.0.1:2379")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	etcd := etcdutil.NewClient(client, "/root")
+
 	// Init consumer, consume errors & messages
-	consumer, err := cluster.NewConsumer(strings.Split(*brokerList, ","), *groupID, strings.Split(*topicList, ","), config)
+	consumer, err := cluster.NewConsumer(strings.Split(*brokerList, ","), *groupID, strings.Split(*topicList, ","), config, etcd)
 	if err != nil {
 		printErrorAndExit(69, "Failed to start consumer: %s", err)
 	}
@@ -73,11 +80,11 @@ func main() {
 			}
 		case ntf, more := <-consumer.Notifications():
 			if more {
-				logger.Printf("Rebalanced: %+v\n", ntf)
+				log.Infof("Rebalanced: %+v\n", ntf)
 			}
 		case err, more := <-consumer.Errors():
 			if more {
-				logger.Printf("Error: %s\n", err.Error())
+				log.Infof("Error: %s\n", err.Error())
 			}
 		case <-sigchan:
 			return

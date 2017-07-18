@@ -115,6 +115,7 @@ func (c *partitionConsumer) MarkOffset(offset int64, metadata string) {
 		c.state.Info.Offset = offset
 		c.state.Info.Metadata = metadata
 		c.state.Dirty = true
+		c.state.LastCommit = time.Now()
 	}
 	c.mu.Unlock()
 }
