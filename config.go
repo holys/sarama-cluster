@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Shopify/sarama"
+	"github.com/ngaut/log"
 )
 
 var minVersion = sarama.V0_9_0_0
@@ -81,16 +82,16 @@ func NewConfig() *Config {
 // sarama.ConfigurationError if the specified values don't make sense.
 func (c *Config) Validate() error {
 	if c.Group.Heartbeat.Interval%time.Millisecond != 0 {
-		sarama.Logger.Println("Group.Heartbeat.Interval only supports millisecond precision; nanoseconds will be truncated.")
+		log.Debugf("Group.Heartbeat.Interval only supports millisecond precision; nanoseconds will be truncated.")
 	}
 	if c.Group.Session.Timeout%time.Millisecond != 0 {
-		sarama.Logger.Println("Group.Session.Timeout only supports millisecond precision; nanoseconds will be truncated.")
+		log.Debugf("Group.Session.Timeout only supports millisecond precision; nanoseconds will be truncated.")
 	}
 	if c.Group.PartitionStrategy != StrategyRange && c.Group.PartitionStrategy != StrategyRoundRobin {
-		sarama.Logger.Println("Group.PartitionStrategy is not supported; range will be assumed.")
+		log.Debugf("Group.PartitionStrategy is not supported; range will be assumed.")
 	}
 	if !c.Version.IsAtLeast(minVersion) {
-		sarama.Logger.Println("Version is not supported; 0.9. will be assumed.")
+		log.Debugf("Version is not supported; 0.9. will be assumed.")
 		c.Version = minVersion
 	}
 	if err := c.Config.Validate(); err != nil {

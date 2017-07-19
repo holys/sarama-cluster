@@ -166,7 +166,6 @@ func (c *Consumer) CommitOffsets() error {
 		}
 	}
 	if !dirty {
-		log.Debug("[commit offset] not dirty")
 		return nil
 	}
 
@@ -405,7 +404,7 @@ func (c *Consumer) handleError(e *Error) {
 			return
 		}
 	} else {
-		sarama.Logger.Printf("%s error: %s\n", e.Ctx, e.Error())
+		log.Debugf("%s error: %s\n", e.Ctx, e.Error())
 	}
 }
 
@@ -455,7 +454,7 @@ func (c *Consumer) heartbeat() error {
 
 // Performs a rebalance, part of the mainLoop()
 func (c *Consumer) rebalance() (map[string][]int32, error) {
-	sarama.Logger.Printf("cluster/consumer %s rebalance\n", c.memberID)
+	log.Debugf("cluster/consumer %s rebalance\n", c.memberID)
 
 	if err := c.refreshMetadata(); err != nil {
 		return nil, err
@@ -486,7 +485,7 @@ func (c *Consumer) rebalance() (map[string][]int32, error) {
 	case err != nil:
 		return nil, err
 	}
-	// sarama.Logger.Printf("cluster/consumer %s/%d joined group %s\n", c.memberID, c.generationID, c.groupID)
+	log.Debugf("cluster/consumer %s/%d joined group %s\n", c.memberID, c.generationID, c.groupID)
 
 	// Sync consumer group state, fetch subscriptions
 	subs, err := c.syncGroup(strategy)
@@ -643,6 +642,8 @@ func (c *Consumer) syncGroup(strategy *balancer) (map[string][]int32, error) {
 		return nil, err
 	}
 
+	log.Debugf("memebers:%+v", members)
+
 	// Sort partitions, for each topic
 	for topic := range members.Topics {
 		sort.Sort(int32Slice(members.Topics[topic]))
@@ -690,7 +691,6 @@ func (c *Consumer) fetchOffsets(subs map[string][]int32) (map[string]map[int32]o
 		for _, partition := range partitions {
 			block := resp.GetBlock(topic, partition)
 			if block == nil {
-				log.Error("sarama.ErrIncompleteResponse")
 				return nil, sarama.ErrIncompleteResponse
 			}
 
@@ -735,6 +735,8 @@ func (c *Consumer) createConsumer(topic string, partition int32, info offsetInfo
 
 	// Store in subscriptions
 	c.subs.Store(topic, partition, pc)
+
+	log.Infof("subs %+v", c.subs.Info)
 
 	// Start partition consumer goroutine
 	go pc.Loop(c.messages, c.errors)
